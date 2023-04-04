@@ -128,7 +128,7 @@ int div_(Instruction* ins_p, Register* reg_p){
     return 0;
 }
 
-int mov(Instruction* ins_p, Register* reg_p){ //TODO 작동?
+int mov(Instruction* ins_p, Register* reg_p){
     // 피연산자 레지스터 인덱스
     int* reg_array = reg_p->register_val_array;
     int op1_reg_idx = str_to_register_index(ins_p->operand1);

@@ -28,5 +28,8 @@ int main() {
         }
     }
 
+    printf("%s", "Press 'q' to exit.");
+    while (getchar()!='q'){
+    }
     return 0;
 }
