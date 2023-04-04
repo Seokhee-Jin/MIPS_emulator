@@ -24,10 +24,6 @@ int main() {
 
     Instruction** instructions = file_to_instructions(FILENAME); // 이게 현재 문제임.
 
-    printf("line:17");
-    while (getchar()!='q'){
-    }
-
     int jump = 0;
     int end = count_lines(FILENAME);
 
@@ -41,8 +37,5 @@ int main() {
         }
     }
 
-    printf("%s", "Press 'q' to exit.");
-    while (getchar()!='q'){
-    }
     return 0;
 }
