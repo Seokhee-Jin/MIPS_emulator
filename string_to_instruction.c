@@ -38,7 +38,7 @@ int count_lines(const char* filename) {
 Instruction** get_instructions(char** lines, int num_lines) {
     /** 문자열의 배열을 즉 명령어 문장들을 Instruction구조체의 배열로 변환.**/
 
-    Instruction** ins_array = malloc(sizeof(Instruction*) * num_lines);
+    Instruction** ins_array = (Instruction**) malloc(sizeof(Instruction*) * num_lines);
 
     for (int i = 0; i < num_lines; i++) {
         char* opcode = strtok(lines[i], " ");
@@ -46,7 +46,7 @@ Instruction** get_instructions(char** lines, int num_lines) {
         char* operand2 = strtok(NULL, " ");
         char* operand3 = strtok(NULL, " ");
 
-        Instruction* ins = malloc(sizeof(Instruction));
+        Instruction* ins = (Instruction*) malloc(sizeof(Instruction));
         ins->opcode = opcode ? strdup(opcode) : NULL;
         ins->operand1 = operand1 ? strdup(operand1) : NULL;
         ins->operand2 = operand2 ? strdup(operand2) : NULL;
@@ -63,7 +63,13 @@ Instruction** file_to_instructions(char* filename){
     /** 텍스트 파일을 Instruction 구조체의 배열로 반환하기 위한 함수. **/
     //=== 전문을 하나의 스트링으로====//
     FILE* file_ptr = fopen(filename, "r");
-    char full_str[MAX_FILE_LEN];
+
+    if (file_ptr == NULL) {
+        fprintf(stderr, "Error opening file.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    char* full_str = (char*) malloc(MAX_FILE_LEN* sizeof(char));
     char c;
     int char_count = 0;
 
