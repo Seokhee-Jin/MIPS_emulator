@@ -1,0 +1,3 @@
+/Users/jinseokhee/CLionProjects/single-cycle_MIPS_emulator/cmake-build-debug/CMakeFiles/single_cycle_MIPS_emulator.dir
+/Users/jinseokhee/CLionProjects/single-cycle_MIPS_emulator/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/jinseokhee/CLionProjects/single-cycle_MIPS_emulator/cmake-build-debug/CMakeFiles/rebuild_cache.dir

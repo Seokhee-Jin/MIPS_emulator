@@ -1,0 +1,7 @@
+# ninja log v5
+3	388	1685385720424200888	CMakeFiles/single_cycle_MIPS_emulator.dir/units.c.o	2c7d6fda74035202
+1	250	1687103199059665128	build.ninja	55a49b42f2ddc7f3
+6	832	1685382391710948212	CMakeFiles/single_cycle_MIPS_emulator.dir/util.c.o	c9469fa17df2dd08
+4	581	1685387484516021442	CMakeFiles/single_cycle_MIPS_emulator.dir/main.bak.c.o	f455ba9494f05856
+3	1523	1685631142756450793	CMakeFiles/single_cycle_MIPS_emulator.dir/main.c.o	4967ba3c69447677
+1524	1775	1685631143014616720	single_cycle_MIPS_emulator	10c309801acb87c1
