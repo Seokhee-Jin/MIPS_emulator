@@ -35,8 +35,6 @@ typedef struct stats_s {
     int mem_access;
 } stats_t;
 
-
-
 // ========================= //
 // == Function Prototypes == //
 // ========================= //
@@ -44,31 +42,34 @@ typedef struct stats_s {
 // read all instructions from a binary
 void read_instructions(char *filename);
 // fetch a instruction from the inst_mem
+
 void fetch_instruction();
 // reset all control signals
 void reset_control();
-
+// determine Control unit's control values from opcode
+void opcode_to_control();
 // decode an instruction accrording to instruction type
 void decode_instruction(u_int32_t fetched_inst);
-//generate signals
-void control_signal();
 
-u_int32_t get_alu_control(); //todo: needed?
+
+// Get alu_control value determined by ALUOp control or funct field of decoded instruction
+u_int32_t get_alu_control();
+// ALU's behavior depends on alu_control // alu unit takes two signed inputs and puts a signed output.
+int alu(int input1, int input2);
 // execute operation or calculate address
 void execute();
-// ALU operands // alu unit takes signed inputs and puts signed outputs.
-int alu(int input1, int input2);
 
 //read data from Data memory or store data to Data memory.
 void access_memory();
+
 //write the result back to a register
 void write_back();
 
 //update  statistics
 void update_stats();
+
 //print out the final result
 void print_result();
-
 
 
 // ====================== //
@@ -92,10 +93,10 @@ signal_t control = {0, };
 instruction_t inst = {0, };
 register_file_t reg_file = {0, };
 
-int verbose = 1;
 char *op_string = "";
-int print_opt = 1;
 stats_t stats = {0, };
+
+bool terminated = false;
 
 
 // =================== //
@@ -106,16 +107,10 @@ int main(int argc, char *argv[]) {
     // 0. load binary file to inst_mem
     char* filename = argv[1];
     read_instructions(filename);
-    u_int32_t previous_inst = 0;
 
-    while(true){
+    while(!terminated){
         // 1. IF
         fetch_instruction();
-        reset_control();
-
-        if ((previous_inst == 0) && (fetched_inst == 0)) {
-            break;
-        }
 
         // 2. ID
         decode_instruction(fetched_inst);
@@ -129,17 +124,8 @@ int main(int argc, char *argv[]) {
         // 5. WB
         write_back();
 
-        previous_inst = fetched_inst;
-
-
-        cycle_num++;
-
         //update statistics
         update_stats();
-
-        if (pc_next == 0xFFFFFFFF) {
-            break;
-        }
     }
 
     print_result();
@@ -189,9 +175,10 @@ void reset_control() {
 
 
 void fetch_instruction(){
-
     pc_now = pc_next;
+
     printf("\nCycle[%d] (PC: 0X%X)\n", cycle_num, pc_now);
+    cycle_num++;
 
     fetched_inst = inst_mem[pc_now / 4];
 
@@ -229,8 +216,10 @@ void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서
         inst.type = 'I';
     }
 
+
     // determine "signal_t control"
-    control_signal();
+    reset_control();
+    opcode_to_control();
 
     // register read
     reg_file.readReg1 = inst.rs;
@@ -255,7 +244,7 @@ void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서
     }
 }
 
-void control_signal(){ // todo: more operations should be implemented
+void opcode_to_control(){
     // Programmable Logic Array Implementation
 
     switch (inst.opcode) {
@@ -401,8 +390,6 @@ int alu(int input1, int input2){
 }
 
 void execute(){
-
-
     int input1 = reg_file.readData1;
     int input2 = control.ALUSrc? imm_value : reg_file.readData2;
 
@@ -423,25 +410,29 @@ void execute(){
     bool PCSrc1 = control.Jump;
     bool PCSrc2 = control.BrTaken;
 
+    // when funct field is "0x8", jr operation occurs.
     if (inst.funct == 0x8){
         pc_next = r[inst.rs];
         printf("  [PC Update] PC <- 0X%X (jr) \n", pc_next);
-        return;
+
+    } else {
+        if (!PCSrc2 && !PCSrc1) { // PC + 4
+            pc_next = pc_now + 4;
+            printf("  [PC Update] PC <- 0X%X + 4\n", pc_now);
+
+        } else if (PCSrc2 && !PCSrc1) { // Br Taken
+            pc_next = (pc_now + 4) + (imm_value * 4);
+            printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (imm_value * 4));
+
+        } else { // Jump
+            pc_next = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
+            printf("  [PC Update] PC <- 0X%X (jump)\n", pc_next);
+        }
     }
 
-    if (!PCSrc2 && !PCSrc1) { // PC + 4
-        pc_next = pc_now + 4;
-        printf("  [PC Update] PC <- 0X%X + 4\n", pc_now);
-
-    } else if (PCSrc2 && !PCSrc1) { // Br Taken
-        pc_next = (pc_now + 4) + (imm_value * 4);
-        printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (imm_value * 4));
-
-    } else { // Jump
-        pc_next = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
-        printf("  [PC Update] PC <- 0X%X (jump)\n", pc_next);
+    if (pc_next == 0xFFFFFFFF) {
+        terminated = true;
     }
-
 }
 
 
