@@ -44,7 +44,7 @@ typedef struct stats_s {
 // read all instructions from a binary
 void read_instructions(char *filename);
 // fetch a instruction from the inst_mem
-u_int32_t fetch_instruction();
+void fetch_instruction();
 // reset all control signals
 void reset_control();
 
@@ -54,22 +54,15 @@ void decode_instruction(u_int32_t fetched_inst);
 void control_signal();
 
 u_int32_t get_alu_control(); //todo: needed?
-// execute an instruciton // output signed alu_result
-int execute();
-// calculate operands // ALU unit takes signed inputs and puts signed outputs.
-int calculate(int input1, int input2);
+// execute operation or calculate address
+void execute();
+// ALU operands // alu unit takes signed inputs and puts signed outputs.
+int alu(int input1, int input2);
 
-//load data from the data memory
-int load(int alu_result);
-//store a value(reg_file.readData2) into the data memory(data_mem[alu_result/4])
-void store(int alu_result);
-//take two inputs(address, write data) and put one output(read data) from data momory
-int access_memory(int alu_result);
+//read data from Data memory or store data to Data memory.
+void access_memory();
 //write the result back to a register
-void write_back(int alu_result, int read_data);
-
-//determine jump or not, then update the program counter
-void update_pc();
+void write_back();
 
 //update  statistics
 void update_stats();
@@ -83,7 +76,11 @@ void print_result();
 // ====================== //
 
 int cycle_num = 1;
-u_int32_t pc = 0;
+u_int32_t pc_next = 0;
+u_int32_t pc_now = 0;
+u_int32_t fetched_inst = 0;
+u_int32_t alu_result_signal = 0;
+u_int32_t read_data_signal = 0;
 
 u_int32_t r[NUM_OF_REGISTERS] = {0, }; // 32개의 레지스터 값... 전부 0.
 int imm_value = 0;
@@ -96,7 +93,6 @@ instruction_t inst = {0, };
 register_file_t reg_file = {0, };
 
 int verbose = 1;
-int is_inst = 0;
 char *op_string = "";
 int print_opt = 1;
 stats_t stats = {0, };
@@ -113,39 +109,35 @@ int main(int argc, char *argv[]) {
     u_int32_t previous_inst = 0;
 
     while(true){
-        printf("\nCycle[%d] (PC: 0X%X)\n", cycle_num, pc);
-
         // 1. IF
-        u_int32_t fetched_inst = fetch_instruction();
+        fetch_instruction();
         reset_control();
 
         if ((previous_inst == 0) && (fetched_inst == 0)) {
             break;
         }
-        if (fetched_inst != 0) {
-            // 2. ID
-            decode_instruction(fetched_inst);
 
-            // 3. EX
-            int alu_result = execute();
+        // 2. ID
+        decode_instruction(fetched_inst);
 
-            // 4. MEM
-            int read_data = access_memory(alu_result);
+        // 3. EX
+        execute();
 
-            // 5. WB
-            write_back(alu_result, read_data);
-        }
+        // 4. MEM
+        access_memory();
+
+        // 5. WB
+        write_back();
+
         previous_inst = fetched_inst;
 
-        // Update PC
-        update_pc();
 
         cycle_num++;
 
         //update statistics
         update_stats();
 
-        if (pc == 0xFFFFFFFF) {
+        if (pc_next == 0xFFFFFFFF) {
             break;
         }
     }
@@ -195,18 +187,21 @@ void reset_control() {
     memset(&control, 0, sizeof(signal_t));
 }
 
-u_int32_t fetch_instruction(){
-    u_int32_t fetched_inst = inst_mem[pc/4];
-    is_inst = fetched_inst;
 
-    if (is_inst) {
+void fetch_instruction(){
+
+    pc_now = pc_next;
+    printf("\nCycle[%d] (PC: 0X%X)\n", cycle_num, pc_now);
+
+    fetched_inst = inst_mem[pc_now / 4];
+
+    if (fetched_inst) {
         printf("  [Fetch Instruction] %08X\n", fetched_inst);
     } else {
         printf("  [Fetch Instruction] No operation!\n");
     }
-
-    return fetched_inst;
 }
+
 
 void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서 음수가 될 수도 있으므로 unsigned int를 사용해 표현범위를 늘려야한다.
     // decode a instruction.
@@ -245,7 +240,7 @@ void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서
     reg_file.readData1 = r[reg_file.readReg1];
     reg_file.readData2 = r[reg_file.readReg2];
 
-    if (is_inst) {
+    if (fetched_inst) {
         printf("  [Decode Instruction] Type: %c\n", inst.type);
         if (inst.type == 'R') {
             printf("    opcode: 0X%X, rs: 0X%X (r[%d]=0X%X), rt: 0X%X (r[%d]=0X%X), rd: 0X%X (r[%d]=0X%X), shamt: 0X%X, funct: 0X%X\n",
@@ -294,7 +289,7 @@ void control_signal(){ // todo: more operations should be implemented
             control.RegWrite = true;
             break;
         case 0x9:
-            op_string = "addiu";
+            op_string = "addiu, li";
             control.ALUSrc = true;
             control.RegWrite = true;
             break;
@@ -327,6 +322,9 @@ u_int32_t get_alu_control(){
         alu_control = control.ALUOp0 ? 6 : 2; // sub : add
     } else {
         switch (inst.funct) {
+            case 0x0:
+                op_string = "nop";
+                break;
             case 0x8:
                 op_string = "jr"; // PC = R[rs] + 0
                 alu_control = 2; // add
@@ -370,7 +368,7 @@ u_int32_t get_alu_control(){
     return alu_control;
 }
 
-int calculate(int input1, int input2){
+int alu(int input1, int input2){
     u_int32_t alu_control = get_alu_control();
     int alu_result;
     switch (alu_control) {
@@ -402,83 +400,81 @@ int calculate(int input1, int input2){
     return alu_result;
 }
 
-void update_pc(){
-    bool PCSrc1 = control.Jump;
-    bool PCSrc2 = control.BrTaken;
+void execute(){
 
-    u_int32_t jp_target = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
-    u_int32_t br_taget = (pc + 4) + (imm_value * 4);
 
-    if (PCSrc1) {
-        pc = jp_target;
-        printf("  [PC Update] PC <- 0X%X (jump)\n", jp_target);
-    } else {
-        if (PCSrc2) {
-            u_int32_t temp = pc;
-            pc = br_taget;
-            printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", temp, (imm_value * 4));
-        } else {
-            pc = pc + 4;
-            printf("  [PC Update] PC <- 0X%X + 4\n", (pc - 4));
-        }
-    }
-}
-
-int execute(){
     int input1 = reg_file.readData1;
     int input2 = control.ALUSrc? imm_value : reg_file.readData2;
 
-    // alu_result
-    int alu_result = calculate(input1, input2);
+    // <1. Execute Operation>
+    if (fetched_inst) { // if or not fetched_inst is nop
+        alu_result_signal = alu(input1, input2);
+        printf("  [Execute Operation] Operation: %s\n", op_string);
+    }
 
+    // <2. Calculate address>
     // determine the BrTaken control signal.
     control.BrTaken = 0;
     if (inst.opcode == 4){ // beq
-        control.BrTaken = control.Branch && (alu_result == 0);
+        control.BrTaken = control.Branch && (alu_result_signal == 0);
     } else if (inst.opcode == 5){ //bne
-        control.BrTaken = control.Branch && (alu_result != 0);
+        control.BrTaken = control.Branch && (alu_result_signal != 0);
+    }
+    bool PCSrc1 = control.Jump;
+    bool PCSrc2 = control.BrTaken;
+
+    if (inst.funct == 0x8){
+        pc_next = r[inst.rs];
+        printf("  [PC Update] PC <- 0X%X (jr) \n", pc_next);
+        return;
     }
 
-    printf("  [Execute Operation] Operation: %s\n", op_string);
+    if (!PCSrc2 && !PCSrc1) { // PC + 4
+        pc_next = pc_now + 4;
+        printf("  [PC Update] PC <- 0X%X + 4\n", pc_now);
 
-    return alu_result;
+    } else if (PCSrc2 && !PCSrc1) { // Br Taken
+        pc_next = (pc_now + 4) + (imm_value * 4);
+        printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (imm_value * 4));
+
+    } else { // Jump
+        pc_next = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
+        printf("  [PC Update] PC <- 0X%X (jump)\n", pc_next);
+    }
+
 }
 
-int load(int alu_result){
-    int read_data = data_mem[alu_result/4];
-    printf("  [Access Memory] Load: data_mem[%d] = 0X%X\n", alu_result/4, data_mem[alu_result/4]);
-    return read_data;
-}
 
-void store(int alu_result){
-    data_mem[alu_result/4] = reg_file.readData2;
-    printf("  [Access Memory] Store: data_mem[%d] <- 0X%X\n", alu_result/4, reg_file.readData2);
-}
-
-int access_memory(int alu_result){
-    u_int32_t address = alu_result;
+void access_memory(){
+    u_int32_t address = alu_result_signal;
     int write_data = reg_file.readData2;
     int read_data = 0;
 
     if (control.MemWrite) {
-        store(alu_result);
+        data_mem[alu_result_signal/4] = reg_file.readData2;
+        printf("  [Access Memory] Store: data_mem[%d] <- 0X%X\n", alu_result_signal/4, reg_file.readData2);
     }
 
     if (control.MemRead) {
-        read_data = load(alu_result);
+        read_data_signal = data_mem[alu_result_signal/4];
+        printf("  [Access Memory] Load: data_mem[%d] = 0X%X\n", alu_result_signal/4, read_data_signal);
     }
-
-    return read_data; // if MemRead == 0, then the return value is meaningless.
 }
 
-void write_back(int alu_result, int read_data){
-    reg_file.writeData = control.MemtoReg? read_data: alu_result;
-    if (inst.opcode == 0x3) reg_file.writeData = (pc + 8); // for jal operation
+void write_back(){
+    reg_file.writeData = control.MemtoReg? read_data_signal: alu_result_signal;
+    if (inst.opcode == 0x3) reg_file.writeData = (pc_now + 4); // for jal operation
     if (inst.opcode == 0xa) reg_file.writeData = (r[inst.rs] < imm_value)? 1: 0; // for slti operation
 
-    if (control.RegWrite && is_inst) {
-        r[reg_file.writeReg] = reg_file.writeData;
-        printf("  [Write Back] r[%d] <- 0X%X\n", reg_file.writeReg, reg_file.writeData);
+    if (!fetched_inst) return; // if nop, then return.
+
+    if (control.RegWrite) {
+        if (reg_file.writeReg == 0) { // todo: is r[0] meaning the PC register?
+            printf("  [Write Back] r[%d] = 0X%X (nothing changed)\n", reg_file.writeReg, r[reg_file.writeReg]);
+        } else {
+            r[reg_file.writeReg] = reg_file.writeData;
+            printf("  [Write Back] r[%d] <- 0X%X\n", reg_file.writeReg, reg_file.writeData);
+        }
     }
 }
 
