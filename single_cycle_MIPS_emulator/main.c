@@ -11,14 +11,14 @@
 // ================ //
 
 typedef struct instruction_s {
-    u_int32_t opcode, rs ,rt ,rd, shamt, funct, imm, addr;
+    u_int16_t opcode, rs ,rt ,rd, shamt, funct, imm, addr;
     char type; // R, I, J
 } instruction_t;
 
 typedef struct register_file_s {
     u_int32_t readReg1, readReg2, writeReg; //input
-    int readData1, readData2; //signed output
-    int writeData;
+    u_int32_t readData1, readData2;
+    u_int32_t writeData;
 } register_file_t;
 
 typedef struct signal_s {
@@ -55,7 +55,7 @@ void decode_instruction(u_int32_t fetched_inst);
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction
 u_int32_t get_alu_control();
 // ALU's behavior depends on alu_control // alu unit takes two signed inputs and puts a signed output.
-int alu(int input1, int input2);
+u_int32_t alu(u_int32_t input1, u_int32_t input2);
 // execute operation or calculate address
 void execute();
 
@@ -84,10 +84,10 @@ u_int32_t alu_result_signal = 0;
 u_int32_t read_data_signal = 0;
 
 u_int32_t r[NUM_OF_REGISTERS] = {0, }; // 32개의 레지스터 값... 전부 0.
-int imm_value = 0;
+u_int32_t ext_imm = 0;
 
 u_int32_t inst_mem[0x1000000 / 4] = {0, };
-int data_mem[0x1000000 / 4] = {0, };
+u_int32_t data_mem[0x1000000 / 4] = {0, };
 
 signal_t control = {0, };
 instruction_t inst = {0, };
@@ -198,16 +198,17 @@ void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서
     inst.rd = fetched_inst % (int)pow(2, 16) / pow(2, 11);
     inst.shamt = fetched_inst % (int)pow(2, 11) / pow(2, 6);
     inst.funct = fetched_inst % (int)pow(2, 6);
-    inst.imm = (int)(fetched_inst % (int)pow(2, 16));
+    inst.imm = fetched_inst % (int)pow(2, 16);
+    inst.addr = fetched_inst % (int)pow(2, 26);
 
-    // imm_value is a signed value of inst.imm.
-    imm_value = inst.imm;
-    // convert from unsigned to signed
-    if(inst.imm >= pow(2, 15)){
-        imm_value = -(pow(2, 16) - inst.imm);
+    // ext_imm is a 32-bit sign extended value of inst.imm.
+    if (inst.imm >= pow(2, 15)){
+        u_int32_t t = 0xffff0000;
+        ext_imm = t + inst.imm;
+    } else {
+        ext_imm = inst.imm;
     }
 
-    inst.addr = fetched_inst % (int)pow(2, 26);
     if (inst.opcode == 2 || inst.opcode == 3){
         inst.type = 'J';
     } else if(inst.opcode == 0){
@@ -357,9 +358,9 @@ u_int32_t get_alu_control(){
     return alu_control;
 }
 
-int alu(int input1, int input2){
+u_int32_t alu(u_int32_t input1, u_int32_t input2){
     u_int32_t alu_control = get_alu_control();
-    int alu_result;
+    u_int32_t alu_result;
     switch (alu_control) {
         case 0:
             alu_result = input1 * input2; // and ( &&보다 더 범용적일 듯 해서 *로 구현)
@@ -390,8 +391,8 @@ int alu(int input1, int input2){
 }
 
 void execute(){
-    int input1 = reg_file.readData1;
-    int input2 = control.ALUSrc? imm_value : reg_file.readData2;
+    u_int32_t input1 = reg_file.readData1;
+    u_int32_t input2 = control.ALUSrc ? ext_imm : reg_file.readData2;
 
     // <1. Execute Operation>
     if (fetched_inst) { // if or not fetched_inst is nop
@@ -421,8 +422,8 @@ void execute(){
             printf("  [PC Update] PC <- 0X%X + 4\n", pc_now);
 
         } else if (PCSrc2 && !PCSrc1) { // Br Taken
-            pc_next = (pc_now + 4) + (imm_value * 4);
-            printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (imm_value * 4));
+            pc_next = (pc_now + 4) + (ext_imm * 4);
+            printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (ext_imm * 4));
 
         } else { // Jump
             pc_next = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
@@ -438,8 +439,8 @@ void execute(){
 
 void access_memory(){
     u_int32_t address = alu_result_signal;
-    int write_data = reg_file.readData2;
-    int read_data = 0;
+    u_int32_t write_data = reg_file.readData2;
+    u_int32_t read_data = 0;
 
     if (control.MemWrite) {
         data_mem[alu_result_signal/4] = reg_file.readData2;
@@ -455,7 +456,7 @@ void access_memory(){
 void write_back(){
     reg_file.writeData = control.MemtoReg? read_data_signal: alu_result_signal;
     if (inst.opcode == 0x3) reg_file.writeData = (pc_now + 4); // for jal operation
-    if (inst.opcode == 0xa) reg_file.writeData = (r[inst.rs] < imm_value)? 1: 0; // for slti operation
+    if (inst.opcode == 0xa) reg_file.writeData = (r[inst.rs] < ext_imm) ? 1 : 0; // for slti operation
 
     if (!fetched_inst) return; // if nop, then return.
 
