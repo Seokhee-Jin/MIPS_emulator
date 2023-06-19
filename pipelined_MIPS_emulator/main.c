@@ -11,7 +11,7 @@
 // ================ //
 
 typedef struct instruction_s {
-    u_int16_t opcode, rs ,rt ,rd, shamt, funct, imm, addr;
+    u_int32_t opcode, rs ,rt ,rd, shamt, funct, imm, addr;
     char type; // R, I, J
 } instruction_t;
 
@@ -35,7 +35,10 @@ typedef struct stats_s {
     int mem_access;
 } stats_t;
 
-// pipeline register (IF/ID, ID/EX, EX/MEM, MEM/WB)
+// ====================================================== //
+// == pipeline registers (IF/ID, ID/EX, EX/MEM, MEM/WB) == //
+// ====================================================== //
+
 typedef struct if_id_s {
     u_int32_t pc;
     u_int32_t inst;
@@ -46,20 +49,24 @@ typedef struct id_ex_s {
     u_int32_t pc; // should be deleted for final version
     u_int32_t readData1, readData2; // signed output
     u_int32_t ext_imm; // sign-extented immediate
-    u_int16_t rt, rd; //
+    u_int32_t rt, rd; //
 } id_ex_t;
 
 typedef struct ex_mem_s {
     bool WB_M[5]; // pipelined control
-    u_int32_t pc;
-    u_int32_t readData1, readData2; // signed output
-    u_int32_t ext_imm // sign-extented immediate
+    u_int32_t adder_result;
+    // u_int32_t zero; // todo: ?? needed?
+    u_int32_t alu_result;
+    u_int32_t readData2;
+    u_int32_t writeReg;
+
 } ex_mem_t;
 
 typedef struct mem_wb_s {
     bool WB[2]; // pipelined control
-    u_int32_t readData1, readData2; // signed output
-    u_int32_t ext_imm // sign-extented immediate
+    u_int32_t readData;
+    u_int32_t alu_result;
+    u_int32_t writeReg;
 } mem_wb_t;
 
 // ========================= //
@@ -80,7 +87,7 @@ void decode_instruction(u_int32_t fetched_inst);
 
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction
 u_int32_t get_alu_control();
-// ALU's behavior depends on alu_control // alu unit takes two signed inputs and puts a signed output.
+// ALU's behavior depends on alu_control
 u_int32_t alu(u_int32_t input1, u_int32_t input2);
 // execute operation or calculate address
 void execute();
@@ -217,7 +224,7 @@ void fetch_instruction(){
 }
 
 
-void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서 음수가 될 수도 있으므로 unsigned int를 사용해 표현범위를 늘려야한다.
+void decode_instruction(u_int32_t fetched_inst){
     // decode a instruction.
     inst.opcode = fetched_inst / (int)pow(2, 26);
     inst.rs = fetched_inst % (int)pow(2, 26) / pow(2, 21) ;

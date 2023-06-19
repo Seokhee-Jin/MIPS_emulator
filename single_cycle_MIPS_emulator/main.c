@@ -11,7 +11,7 @@
 // ================ //
 
 typedef struct instruction_s {
-    u_int16_t opcode, rs ,rt ,rd, shamt, funct, imm, addr;
+    u_int32_t opcode, rs ,rt ,rd, shamt, funct, imm, addr;
     char type; // R, I, J
 } instruction_t;
 
@@ -54,7 +54,7 @@ void decode_instruction(u_int32_t fetched_inst);
 
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction
 u_int32_t get_alu_control();
-// ALU's behavior depends on alu_control // alu unit takes two signed inputs and puts a signed output.
+// ALU's behavior depends on alu_control
 u_int32_t alu(u_int32_t input1, u_int32_t input2);
 // execute operation or calculate address
 void execute();
@@ -190,7 +190,7 @@ void fetch_instruction(){
 }
 
 
-void decode_instruction(u_int32_t fetched_inst){ // 오버플로우 발생해서 음수가 될 수도 있으므로 unsigned int를 사용해 표현범위를 늘려야한다.
+void decode_instruction(u_int32_t fetched_inst){
     // decode a instruction.
     inst.opcode = fetched_inst / (int)pow(2, 26);
     inst.rs = fetched_inst % (int)pow(2, 26) / pow(2, 21) ;
