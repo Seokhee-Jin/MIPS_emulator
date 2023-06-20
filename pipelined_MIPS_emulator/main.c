@@ -21,13 +21,15 @@ typedef struct register_file_s {
     u_int32_t writeData;
 } register_file_t;
 
-typedef struct signal_s {
+typedef struct control_s {
     bool ALUSrc;
     bool RegDest, RegWrite;
     bool MemRead, MemWrite, MemtoReg;
     bool Branch, Jump, BrTaken;
     bool ALUOp1, ALUOp0;
-} signal_t;
+} control_t;
+
+// bool Jump; // todo: 임시... 처리고민
 
 typedef struct stats_s {
     int type_R, type_I, type_J;
@@ -35,9 +37,8 @@ typedef struct stats_s {
     int mem_access;
 } stats_t;
 
-// ====================================================== //
+
 // == pipeline registers (IF/ID, ID/EX, EX/MEM, MEM/WB) == //
-// ====================================================== //
 
 typedef struct if_id_s {
     u_int32_t pc;
@@ -45,7 +46,7 @@ typedef struct if_id_s {
 } if_id_t;
 
 typedef struct id_ex_s {
-    bool WB_M_EX[9]; // pipelined control
+    bool EX_M_WB[9]; // pipelined control
     u_int32_t pc; // should be deleted for final version
     u_int32_t readData1, readData2; // signed output
     u_int32_t ext_imm; // sign-extented immediate
@@ -53,7 +54,7 @@ typedef struct id_ex_s {
 } id_ex_t;
 
 typedef struct ex_mem_s {
-    bool WB_M[5]; // pipelined control
+    bool M_WB[5]; // pipelined control
     u_int32_t adder_result;
     // u_int32_t zero; // todo: ?? needed?
     u_int32_t alu_result;
@@ -80,9 +81,9 @@ void fetch_instruction();
 // reset all control signals
 void reset_control();
 // determine Control unit's control values from opcode
-void opcode_to_control();
+char *opcode_to_control(u_int32_t opcode, control_t *control);
 // decode an instruction accrording to instruction type
-void decode_instruction(u_int32_t fetched_inst);
+void decode_instruction();
 
 
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction
@@ -110,26 +111,34 @@ void print_result();
 // ====================== //
 
 int cycle_num = 1;
-u_int32_t pc_next = 0;
-u_int32_t pc_now = 0;
-u_int32_t fetched_inst = 0;
+//u_int32_t pc_next = 0;
+//u_int32_t pc_now = 0;
+u_int32_t pc_reg = 0;
+
+//u_int32_t fetched_inst = 0;
 u_int32_t alu_result_signal = 0;
 u_int32_t read_data_signal = 0;
 
 u_int32_t r[NUM_OF_REGISTERS] = {0, }; // 32개의 레지스터 값... 전부 0.
-u_int32_t ext_imm = 0;
+// u_int32_t ext_imm = 0;
 
 u_int32_t inst_mem[0x1000000 / 4] = {0, };
 u_int32_t data_mem[0x1000000 / 4] = {0, };
 
-signal_t control = {0, };
-instruction_t inst = {0, };
+// control_t control = {0, };
+// instruction_t inst = {0, };
 register_file_t reg_file = {0, };
 
-char *op_string = "";
+char *op_name = "";
 stats_t stats = {0, };
 
 bool terminated = false;
+
+// == pipeline global variables == //
+if_id_t if_id = {0, };
+id_ex_t id_ex = {0, };
+ex_mem_t ex_mem = {0, };
+mem_wb_t mem_wb = {0, };
 
 
 
@@ -147,7 +156,7 @@ int main(int argc, char *argv[]) {
         fetch_instruction();
 
         // 2. ID
-        decode_instruction(fetched_inst);
+        decode_instruction();
 
         // 3. EX
         execute();
@@ -203,29 +212,39 @@ void read_instructions(char *filename){
 
 }
 
-void reset_control() {
-    memset(&control, 0, sizeof(signal_t));
+void reset_control(control_t *control) {
+    memset(control, 0, sizeof(control_t));
 }
 
 
 void fetch_instruction(){
-    pc_now = pc_next;
-
-    printf("\nCycle[%d] (PC: 0X%X)\n", cycle_num, pc_now);
+    printf("\nCycle[%d] (PC: 0X%X)\n", cycle_num, pc_reg);
     cycle_num++;
 
-    fetched_inst = inst_mem[pc_now / 4];
+    u_int32_t fetched_inst = inst_mem[pc_reg / 4];
 
     if (fetched_inst) {
         printf("  [Fetch Instruction] %08X\n", fetched_inst);
     } else {
         printf("  [Fetch Instruction] No operation!\n");
     }
+
+    // Store values in the pipeline register.
+    if_id.pc = pc_reg + 4; // todo: more gracefully...
+    if_id.inst = fetched_inst;
 }
 
 
-void decode_instruction(u_int32_t fetched_inst){
-    // decode a instruction.
+void decode_instruction(){
+    // Load values from the pipeline register.
+    u_int32_t pc = if_id.pc;
+    u_int32_t fetched_inst = if_id.inst;
+
+
+    // < 1. decode a instruction >
+    instruction_t inst = {0, }; //
+    control_t control = {0, }; // These two variable were global in the previous single-cycle project.
+
     inst.opcode = fetched_inst / (int)pow(2, 26);
     inst.rs = fetched_inst % (int)pow(2, 26) / pow(2, 21) ;
     inst.rt = fetched_inst % (int)pow(2, 21) / pow(2, 16);
@@ -235,10 +254,11 @@ void decode_instruction(u_int32_t fetched_inst){
     inst.imm = fetched_inst % (int)pow(2, 16);
     inst.addr = fetched_inst % (int)pow(2, 26);
 
-    // ext_imm is a 32-bit sign extended value of inst.imm.
+    // Sign-Extension
+    u_int32_t ext_imm;
     if (inst.imm >= pow(2, 15)){
         u_int32_t t = 0xffff0000;
-        ext_imm = t + inst.imm;
+        ext_imm = t + inst.imm; // ext_imm is a 32-bit sign extended value of inst.imm.
     } else {
         ext_imm = inst.imm;
     }
@@ -252,20 +272,21 @@ void decode_instruction(u_int32_t fetched_inst){
     }
 
 
-    // determine "signal_t control"
-    reset_control();
-    opcode_to_control();
+    // determine "control_t control"
+    reset_control(&control);
+    char *op_name = opcode_to_control(inst.opcode, &control);
 
     // register read
-    reg_file.readReg1 = inst.rs;
-    reg_file.readReg2 = inst.rt;
-    reg_file.writeReg = control.RegDest? inst.rd: inst.rt;
-    reg_file.writeReg = control.Jump? 31: reg_file.writeReg; // for "jal" operation
-    reg_file.readData1 = r[reg_file.readReg1];
-    reg_file.readData2 = r[reg_file.readReg2];
+    u_int32_t readData1, readData2;
+    readData1 = r[inst.rs];
+    readData2 = r[inst.rt];
+
+    //reg_file.writeReg = control.RegDest? inst.rd: inst.rt; // todo: writeReg would be determined in the execution stage.
+    //reg_file.writeReg = control.Jump? 31: reg_file.writeReg; // for "jal" operation // todo: **important** this feature should be added again in any stage.
+
 
     if (fetched_inst) {
-        printf("  [Decode Instruction] Type: %c\n", inst.type);
+        printf("  [Decode Instruction] Type: %c, Name: %s\n", inst.type, op_name);
         if (inst.type == 'R') {
             printf("    opcode: 0X%X, rs: 0X%X (r[%d]=0X%X), rt: 0X%X (r[%d]=0X%X), rd: 0X%X (r[%d]=0X%X), shamt: 0X%X, funct: 0X%X\n",
                    inst.opcode, inst.rs, inst.rs, r[inst.rs], inst.rt, inst.rt, r[inst.rt], inst.rd, inst.rd, r[inst.rd],
@@ -277,67 +298,133 @@ void decode_instruction(u_int32_t fetched_inst){
             printf("    opcode: 0X%X, addr: 0X%X\n", inst.opcode, inst.addr);
         }
     }
+
+    // <2. Calculate address and determine next pc > // Control Hazard: early computation of branch (p.349)
+
+    // <2-1. Calculate address >
+
+    // <2-1. determine the PCSrc control signal>
+    // zero test logic
+    bool is_zero = ((readData1 - readData2) == 0);
+
+    bool Jump = (inst.opcode == 2 || inst.opcode == 3);
+    bool BrTaken = false;
+    if (inst.opcode == 4){ // beq
+        BrTaken = control.Branch && (is_zero == true); // branch
+    } else if (inst.opcode == 5){ //bne
+        BrTaken = control.Branch && (is_zero == false);
+    }
+
+    bool PCSrc1 = Jump;
+    bool PCSrc2 = BrTaken;
+
+    // <2-2. determine the next pc value>
+    // when funct field is "0x8", jr operation occurs.
+    if (inst.funct == 0x8){
+        pc_reg = r[inst.rs];
+
+        printf("  [PC Update] PC <- 0X%X (jr) \n", pc_reg);
+
+    } else {
+        if (!PCSrc2 && !PCSrc1) { // PC + 4
+            pc_reg = pc;
+            printf("  [PC Update] PC <- 0X%X\n", pc_reg);
+
+        } else if (PCSrc2 && !PCSrc1) { // Br Taken
+            pc_reg = pc + (ext_imm * 4);
+            printf("  [PC Update] PC <- 0X%X = 0X%X + 0X%X (branch)\n", pc_reg, pc, (ext_imm * 4));
+
+        } else { // Jump
+            pc_reg = inst.addr * 4 + (u_int32_t)(floor(pc / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
+            printf("  [PC Update] PC <- 0X%X (jump)\n", pc_reg);
+        }
+    }
+
+    if (pc_reg == 0xFFFFFFFF) { // todo: still needed?
+        terminated = true;
+    }
+    //todo: new forwarding unin needed // Data hazard for branches (4-5.24p, 350p)
+
+    // Store values in the pipeline register.
+    id_ex.EX_M_WB[0] = control.RegDest;
+    id_ex.EX_M_WB[1] = control.ALUOp1;
+    id_ex.EX_M_WB[2] = control.ALUOp0;
+    id_ex.EX_M_WB[3] = control.ALUSrc;
+    id_ex.EX_M_WB[4] = control.Branch;
+    id_ex.EX_M_WB[5] = control.MemRead;
+    id_ex.EX_M_WB[6] = control.MemWrite;
+    id_ex.EX_M_WB[7] = control.RegWrite;
+    id_ex.EX_M_WB[8] = control.MemtoReg;
+    id_ex.pc = pc;
+    id_ex.readData1 = reg_file.readData1;
+    id_ex.readData2 = reg_file.readData2;
+    id_ex.ext_imm = ext_imm;
+    id_ex.rt = inst.rt;
+    id_ex.rd = inst.rd;
 }
 
-void opcode_to_control(){
+char *opcode_to_control(u_int32_t opcode, control_t *control){
     // Programmable Logic Array Implementation
 
-    switch (inst.opcode) {
+    char *op_name;
+    switch (opcode) {
         case 0x0: // R_format
-            control.RegDest = true;
-            control.RegWrite = true;
-            control.ALUOp1 = true;
+            control->RegDest = true;
+            control->RegWrite = true;
+            control->ALUOp1 = true;
             break;
         case 0x2: // j
-            op_string = "j";
-            control.Jump = true;
+            op_name = "j";
+            control->Jump = true;
             break;
         case 0x3: // jal
-            op_string = "jal";
-            control.Jump = true;
-            control.RegWrite = true;
+            op_name = "jal";
+            control->Jump = true;
+            control->RegWrite = true;
             break;
         case 0x4: // beq
-            op_string = "beq";
-            control.Branch = true;
-            control.ALUOp0 = true;
+            op_name = "beq";
+            control->Branch = true;
+            control->ALUOp0 = true;
             break;
         case 0x5: // bne
-            op_string = "bne";
-            control.Branch = true;
-            control.ALUOp0 = true;
+            op_name = "bne";
+            control->Branch = true;
+            control->ALUOp0 = true;
             break;
         case 0x8:
-            op_string = "addi";
-            control.ALUSrc = true;
-            control.RegWrite = true;
+            op_name = "addi";
+            control->ALUSrc = true;
+            control->RegWrite = true;
             break;
         case 0x9:
-            op_string = "addiu, li";
-            control.ALUSrc = true;
-            control.RegWrite = true;
+            op_name = "addiu, li";
+            control->ALUSrc = true;
+            control->RegWrite = true;
             break;
         case 0xa:
-            op_string = "slti";
-            control.ALUSrc = true;
-            control.RegWrite = true;
+            op_name = "slti";
+            control->ALUSrc = true;
+            control->RegWrite = true;
             break;
         case 0x23:
-            op_string = "lw";
-            control.ALUSrc = true;
-            control.MemRead = true;
-            control.MemtoReg = true;
-            control.RegWrite = true;
+            op_name = "lw";
+            control->ALUSrc = true;
+            control->MemRead = true;
+            control->MemtoReg = true;
+            control->RegWrite = true;
             break;
         case 0x2b:
-            op_string = "sw";
-            control.ALUSrc = true;
-            control.MemWrite = true;
+            op_name = "sw";
+            control->ALUSrc = true;
+            control->MemWrite = true;
             break;
         default:
-            fprintf(stderr, "\nopcode error: 0X%X", inst.opcode);
+            fprintf(stderr, "\nopcode error: 0X%X", opcode);
             exit(1);
     }
+
+    return op_name;
 }
 
 u_int32_t get_alu_control(){
@@ -347,38 +434,39 @@ u_int32_t get_alu_control(){
     } else {
         switch (inst.funct) {
             case 0x0:
-                op_string = "nop";
+                op_name = "nop";
+                alu_control = 0xFFFFFFFF;
                 break;
             case 0x8:
-                op_string = "jr"; // PC = R[rs] + 0
+                op_name = "jr"; // PC = R[rs] + 0
                 alu_control = 2; // add
                 break;
             case 0x20: // add
-                op_string = "add";
+                op_name = "add";
                 alu_control = 2; // add
                 break;
             case 0x21: // addu
-                op_string = "addu";
+                op_name = "addu";
                 alu_control = 2; // add
                 break;
             case 0x22: // sub
-                op_string = "sub";
+                op_name = "sub";
                 alu_control = 6; // sub
                 break;
             case 0x24: // and
-                op_string = "and";
+                op_name = "and";
                 alu_control = 0; // and
                 break;
             case 0x25: // or, move
-                op_string = "or, move";
+                op_name = "or, move";
                 alu_control = 1; // or
                 break;
             case 0x2a: // slt
-                op_string = "slt";
+                op_name = "slt";
                 alu_control = 7; // set less than
                 break;
             case 0xa:
-                op_string = "slti";
+                op_name = "slti";
                 control.RegWrite = true;
                 control.ALUSrc = true;
                 break;
@@ -396,6 +484,9 @@ u_int32_t alu(u_int32_t input1, u_int32_t input2){
     u_int32_t alu_control = get_alu_control();
     u_int32_t alu_result;
     switch (alu_control) {
+        case 0xFFFFFFFF:
+            alu_result = 0xFFFFFFFF;
+            break;
         case 0:
             alu_result = input1 * input2; // and ( &&보다 더 범용적일 듯 해서 *로 구현)
             break;
@@ -425,25 +516,34 @@ u_int32_t alu(u_int32_t input1, u_int32_t input2){
 }
 
 void execute(){
-    u_int32_t input1 = reg_file.readData1;
-    u_int32_t input2 = control.ALUSrc ? ext_imm : reg_file.readData2;
+    // Load values from the pipeline register.
+    u_int32_t *control = id_ex.EX_M_WB;
+    u_int32_t pc = id_ex.pc;
+    u_int32_t readData1 = id_ex.readData1;
+    u_int32_t readData2 = id_ex.readData2;
+    u_int32_t ext_imm = id_ex.ext_imm;
+    u_int32_t rt = id_ex.rt;
+    u_int32_t rd = id_ex.rd;
+
+    u_int32_t input1 = readData1;
+    u_int32_t input2 = control[3] ? ext_imm : readData2; //ALUSrc
 
     // <1. Execute Operation>
-    if (fetched_inst) { // if or not fetched_inst is nop
-        alu_result_signal = alu(input1, input2);
-        printf("  [Execute Operation] Operation: %s\n", op_string);
+    u_int32_t alu_result = alu(input1, input2);
+    if (alu_result != 0xFFFFFFFF) {
+        printf("  [Execute Operation] Operation: %s\n", op_name);
     }
 
     // <2. Calculate address>
     // determine the BrTaken control signal.
-    control.BrTaken = 0;
+    bool BrTaken = 0;
     if (inst.opcode == 4){ // beq
-        control.BrTaken = control.Branch && (alu_result_signal == 0);
+        BrTaken = control[4] && (alu_result == 0); // branch
     } else if (inst.opcode == 5){ //bne
-        control.BrTaken = control.Branch && (alu_result_signal != 0);
+        BrTaken = control[4] && (alu_result != 0);
     }
-    bool PCSrc1 = control.Jump;
-    bool PCSrc2 = control.BrTaken;
+    bool PCSrc1 = Jump;
+    bool PCSrc2 = BrTaken;
 
     // when funct field is "0x8", jr operation occurs.
     if (inst.funct == 0x8){
@@ -468,6 +568,9 @@ void execute(){
     if (pc_next == 0xFFFFFFFF) {
         terminated = true;
     }
+
+    // Store values in the pipeline register.
+
 }
 
 

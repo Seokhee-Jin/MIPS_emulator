@@ -21,13 +21,13 @@ typedef struct register_file_s {
     u_int32_t writeData;
 } register_file_t;
 
-typedef struct signal_s {
+typedef struct control_s {
     bool ALUSrc;
     bool RegDest, RegWrite;
     bool MemRead, MemWrite, MemtoReg;
     bool Branch, Jump, BrTaken;
     bool ALUOp1, ALUOp0;
-} signal_t;
+} control_t;
 
 typedef struct stats_s {
     int type_R, type_I, type_J;
@@ -46,10 +46,10 @@ void read_instructions(char *filename);
 void fetch_instruction();
 // reset all control signals
 void reset_control();
-// determine Control unit's control values from opcode
+// determine Control unit's control values from opcode and output operation name.
 void opcode_to_control();
 // decode an instruction accrording to instruction type
-void decode_instruction(u_int32_t fetched_inst);
+void decode_instruction();
 
 
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction
@@ -89,11 +89,11 @@ u_int32_t ext_imm = 0;
 u_int32_t inst_mem[0x1000000 / 4] = {0, };
 u_int32_t data_mem[0x1000000 / 4] = {0, };
 
-signal_t control = {0, };
+control_t control = {0, };
 instruction_t inst = {0, };
 register_file_t reg_file = {0, };
 
-char *op_string = "";
+char *op_name = "";
 stats_t stats = {0, };
 
 bool terminated = false;
@@ -113,7 +113,7 @@ int main(int argc, char *argv[]) {
         fetch_instruction();
 
         // 2. ID
-        decode_instruction(fetched_inst);
+        decode_instruction();
 
         // 3. EX
         execute();
@@ -170,7 +170,7 @@ void read_instructions(char *filename){
 }
 
 void reset_control() {
-    memset(&control, 0, sizeof(signal_t));
+    memset(&control, 0, sizeof(control_t));
 }
 
 
@@ -190,7 +190,7 @@ void fetch_instruction(){
 }
 
 
-void decode_instruction(u_int32_t fetched_inst){
+void decode_instruction(){
     // decode a instruction.
     inst.opcode = fetched_inst / (int)pow(2, 26);
     inst.rs = fetched_inst % (int)pow(2, 26) / pow(2, 21) ;
@@ -218,7 +218,7 @@ void decode_instruction(u_int32_t fetched_inst){
     }
 
 
-    // determine "signal_t control"
+    // determine "control_t control"
     reset_control();
     opcode_to_control();
 
@@ -255,48 +255,48 @@ void opcode_to_control(){
             control.ALUOp1 = true;
             break;
         case 0x2: // j
-            op_string = "j";
+            op_name = "j";
             control.Jump = true;
             break;
         case 0x3: // jal
-            op_string = "jal";
+            op_name = "jal";
             control.Jump = true;
             control.RegWrite = true;
             break;
         case 0x4: // beq
-            op_string = "beq";
+            op_name = "beq";
             control.Branch = true;
             control.ALUOp0 = true;
             break;
         case 0x5: // bne
-            op_string = "bne";
+            op_name = "bne";
             control.Branch = true;
             control.ALUOp0 = true;
             break;
         case 0x8:
-            op_string = "addi";
+            op_name = "addi";
             control.ALUSrc = true;
             control.RegWrite = true;
             break;
         case 0x9:
-            op_string = "addiu, li";
+            op_name = "addiu, li";
             control.ALUSrc = true;
             control.RegWrite = true;
             break;
         case 0xa:
-            op_string = "slti";
+            op_name = "slti";
             control.ALUSrc = true;
             control.RegWrite = true;
             break;
         case 0x23:
-            op_string = "lw";
+            op_name = "lw";
             control.ALUSrc = true;
             control.MemRead = true;
             control.MemtoReg = true;
             control.RegWrite = true;
             break;
         case 0x2b:
-            op_string = "sw";
+            op_name = "sw";
             control.ALUSrc = true;
             control.MemWrite = true;
             break;
@@ -313,38 +313,39 @@ u_int32_t get_alu_control(){
     } else {
         switch (inst.funct) {
             case 0x0:
-                op_string = "nop";
+                op_name = "nop";
+                alu_control = 0xFFFFFFFF;
                 break;
             case 0x8:
-                op_string = "jr"; // PC = R[rs] + 0
+                op_name = "jr"; // PC = R[rs] + 0
                 alu_control = 2; // add
                 break;
             case 0x20: // add
-                op_string = "add";
+                op_name = "add";
                 alu_control = 2; // add
                 break;
             case 0x21: // addu
-                op_string = "addu";
+                op_name = "addu";
                 alu_control = 2; // add
                 break;
             case 0x22: // sub
-                op_string = "sub";
+                op_name = "sub";
                 alu_control = 6; // sub
                 break;
             case 0x24: // and
-                op_string = "and";
+                op_name = "and";
                 alu_control = 0; // and
                 break;
             case 0x25: // or, move
-                op_string = "or, move";
+                op_name = "or, move";
                 alu_control = 1; // or
                 break;
             case 0x2a: // slt
-                op_string = "slt";
+                op_name = "slt";
                 alu_control = 7; // set less than
                 break;
             case 0xa:
-                op_string = "slti";
+                op_name = "slti";
                 control.RegWrite = true;
                 control.ALUSrc = true;
                 break;
@@ -362,6 +363,9 @@ u_int32_t alu(u_int32_t input1, u_int32_t input2){
     u_int32_t alu_control = get_alu_control();
     u_int32_t alu_result;
     switch (alu_control) {
+        case 0xFFFFFFFF:
+            alu_result = 0xFFFFFFFF;
+            break;
         case 0:
             alu_result = input1 * input2; // and ( &&보다 더 범용적일 듯 해서 *로 구현)
             break;
@@ -395,9 +399,9 @@ void execute(){
     u_int32_t input2 = control.ALUSrc ? ext_imm : reg_file.readData2;
 
     // <1. Execute Operation>
-    if (fetched_inst) { // if or not fetched_inst is nop
-        alu_result_signal = alu(input1, input2);
-        printf("  [Execute Operation] Operation: %s\n", op_string);
+    alu_result_signal = alu(input1, input2);
+    if (alu_result_signal != 0xFFFFFFFF) {
+        printf("  [Execute Operation] Operation: %s\n", op_name);
     }
 
     // <2. Calculate address>
@@ -426,7 +430,7 @@ void execute(){
             printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (ext_imm * 4));
 
         } else { // Jump
-            pc_next = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
+            pc_next = inst.addr * 4 + (u_int32_t)(floor(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
             printf("  [PC Update] PC <- 0X%X (jump)\n", pc_next);
         }
     }
