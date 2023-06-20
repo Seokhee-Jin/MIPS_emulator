@@ -53,7 +53,7 @@ void decode_instruction();
 
 
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction
-u_int32_t get_alu_control();
+u_int32_t set_alu_control();
 // ALU's behavior depends on alu_control
 u_int32_t alu(u_int32_t input1, u_int32_t input2);
 // execute operation or calculate address
@@ -306,7 +306,7 @@ void opcode_to_control(){
     }
 }
 
-u_int32_t get_alu_control(){
+u_int32_t set_alu_control(){
     u_int32_t alu_control;
     if (control.ALUOp1  == 0){
         alu_control = control.ALUOp0 ? 6 : 2; // sub : add
@@ -344,11 +344,6 @@ u_int32_t get_alu_control(){
                 op_name = "slt";
                 alu_control = 7; // set less than
                 break;
-            case 0xa:
-                op_name = "slti";
-                control.RegWrite = true;
-                control.ALUSrc = true;
-                break;
 
             default:
                 fprintf(stderr, "\nfunct error: 0X%X", inst.funct);
@@ -360,7 +355,7 @@ u_int32_t get_alu_control(){
 }
 
 u_int32_t alu(u_int32_t input1, u_int32_t input2){
-    u_int32_t alu_control = get_alu_control();
+    u_int32_t alu_control = set_alu_control();
     u_int32_t alu_result;
     switch (alu_control) {
         case 0xFFFFFFFF:
