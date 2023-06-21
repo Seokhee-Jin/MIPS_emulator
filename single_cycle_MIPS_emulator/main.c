@@ -23,7 +23,7 @@ typedef struct register_file_s {
 
 typedef struct control_s {
     bool ALUSrc;
-    bool RegDest, RegWrite;
+    bool RegDst, RegWrite;
     bool MemRead, MemWrite, MemtoReg;
     bool Branch, Jump, BrTaken;
     bool ALUOp1, ALUOp0;
@@ -225,7 +225,7 @@ void decode_instruction(){
     // register read
     reg_file.readReg1 = inst.rs;
     reg_file.readReg2 = inst.rt;
-    reg_file.writeReg = control.RegDest? inst.rd: inst.rt;
+    reg_file.writeReg = control.RegDst ? inst.rd : inst.rt;
     reg_file.writeReg = control.Jump? 31: reg_file.writeReg; // for "jal" operation
     reg_file.readData1 = r[reg_file.readReg1];
     reg_file.readData2 = r[reg_file.readReg2];
@@ -250,7 +250,7 @@ void opcode_to_control(){
 
     switch (inst.opcode) {
         case 0x0: // R_format
-            control.RegDest = true;
+            control.RegDst = true;
             control.RegWrite = true;
             control.ALUOp1 = true;
             break;

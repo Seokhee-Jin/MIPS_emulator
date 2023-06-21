@@ -23,7 +23,7 @@ typedef struct register_file_s {
 
 typedef struct control_s {
     bool ALUSrc;
-    bool RegDest, RegWrite;
+    bool RegDst, RegWrite;
     bool MemRead, MemWrite, MemtoReg;
     bool Branch, Jump, BrTaken;
     bool ALUOp1, ALUOp0;
@@ -36,35 +36,32 @@ typedef struct stats_s {
 } stats_t;
 
 // == pipeline registers (IF/ID, ID/EX, EX/MEM, MEM/WB) == //
-// * pipelined control: 0-RegDst, 1-ALUOp1, 2-ALUOp0, 3-ALUSrc, / 4-Branch, 5-MemRead, 6-MemWrite, / 7-RegWrite, 8-MemtoReg
+
 typedef struct if_id_s {
     u_int32_t pc;
     u_int32_t inst;
 } if_id_t;
 
 typedef struct id_ex_s {
-    bool EX_M_WB[9]; // pipelined control
-    u_int32_t pc; // should be deleted for final version
+    bool EX_M_WB[9]; // pipelined control: 0-RegDst, 1-ALUOp1, 2-ALUOp0, 3-ALUSrc, / 4-Branch, 5-MemRead, 6-MemWrite, / 7-RegWrite, 8-MemtoReg
     u_int32_t readData1, readData2; // signed output
     u_int32_t ext_imm; // sign-extented immediate
-    u_int32_t rt, rd; //
+    u_int32_t rs, rt, rd; //
 } id_ex_t;
 
 typedef struct ex_mem_s {
-    bool M_WB[5]; // pipelined control
-    u_int32_t adder_result;
-    // u_int32_t zero; // todo: ?? needed?
+    bool M_WB[5]; // pipelined control: 0-Branch, 1-MemRead, 2-MemWrite, / 3-RegWrite, 4-MemtoReg
     u_int32_t alu_result;
     u_int32_t readData2;
-    u_int32_t writeReg;
+    u_int32_t rd;
 
 } ex_mem_t;
 
 typedef struct mem_wb_s {
-    bool WB[2]; // pipelined control
+    bool WB[2]; // pipelined control:  0-RegWrite, 1-MemtoReg
     u_int32_t readData;
     u_int32_t alu_result;
-    u_int32_t writeReg;
+    u_int32_t rd
 } mem_wb_t;
 
 // ========================= //
@@ -82,7 +79,7 @@ void set_control(u_int32_t opcode, control_t *control, char *opname);
 // decode an instruction accrording to instruction type todo: 수정하기
 void decode_instruction();
 // Get alu_control value determined by ALUOp control or funct field of decoded instruction todo: 수정하기
-void set_alu_control(bool ALUOp1, bool ALUOp0, u_int32_t funct, u_int32_t *alu_control, char *opname);
+u_int32_t get_alu_control(bool ALUOp1, bool ALUOp0, u_int32_t funct, char *opname);
 // ALU's behavior depends on alu_control
 u_int32_t alu(u_int32_t alu_control, u_int32_t input1, u_int32_t input2);
 // execute operation or calculate address
@@ -274,16 +271,12 @@ void decode_instruction(){
     reset_control(&control);
     set_control(inst.opcode, &control, opname);
 
-//    u_int32_t *alu_control = (u_int32_t *)malloc(sizeof(u_int32_t)); todo: alu_control is in the execute stage.
-//    *alu_control = 0xFFFFFFFF;
-//    set_alu_control(control.ALUOp1, control.ALUOp0, inst.funct, alu_control, opname);
-
     // <3. register read>
     u_int32_t readData1, readData2;
     readData1 = r[inst.rs];
     readData2 = r[inst.rt];
 
-    //reg_file.writeReg = control.RegDest? inst.rd: inst.rt; // todo: writeReg would be determined in the execution stage.
+    //reg_file.writeReg = control.RegDst? inst.rd: inst.rt; // todo: writeReg would be determined in the execution stage.
     //reg_file.writeReg = control.Jump? 31: reg_file.writeReg; // for "jal" operation // todo: **important** this feature should be added again in any stage.
 
 
@@ -358,7 +351,7 @@ void decode_instruction(){
         id_ex.EX_M_WB[4] = id_ex.EX_M_WB[5] = id_ex.EX_M_WB[6] = id_ex.EX_M_WB[7] =
         id_ex.EX_M_WB[8] = false;
     } else {
-        id_ex.EX_M_WB[0] = control.RegDest;
+        id_ex.EX_M_WB[0] = control.RegDst;
         id_ex.EX_M_WB[1] = control.ALUOp1;
         id_ex.EX_M_WB[2] = control.ALUOp0;
         id_ex.EX_M_WB[3] = control.ALUSrc;
@@ -368,10 +361,10 @@ void decode_instruction(){
         id_ex.EX_M_WB[7] = control.RegWrite;
         id_ex.EX_M_WB[8] = control.MemtoReg;
     }
-    id_ex.pc = pc;
     id_ex.readData1 = readData1;
     id_ex.readData2 = readData2;
     id_ex.ext_imm = ext_imm;
+    id_ex.rs = inst.rs;
     id_ex.rt = inst.rt;
     id_ex.rd = inst.rd;
 }
@@ -381,7 +374,7 @@ void set_control(u_int32_t opcode, control_t *control, char *opname) {
 
     switch (opcode) {
         case 0x0: // R_format
-            control->RegDest = true;
+            control->RegDst = true;
             control->RegWrite = true;
             control->ALUOp1 = true;
             break;
@@ -437,51 +430,52 @@ void set_control(u_int32_t opcode, control_t *control, char *opname) {
     }
 }
 
-void set_alu_control(bool ALUOp1, bool ALUOp0, u_int32_t funct, u_int32_t *alu_control, char *opname) {
+u_int32_t get_alu_control(bool ALUOp1, bool ALUOp0, u_int32_t funct, char *opname) {
+    u_int32_t alu_control;
 
     if (ALUOp1  == 0){
-        *alu_control = ALUOp0? 6 : 2; // sub : add
+        alu_control = ALUOp0? 6 : 2; // sub : add
     } else {
         switch (funct) {
             case 0x0:
-                opname = "nop";
-                *alu_control = 0xFFFFFFFF;
+                strcpy(opname, "nop");
+                alu_control = 0xFFFFFFFF; // alu_control = -1 is nop condition defined by me.
                 break;
             case 0x8:
-                opname = "jr"; // PC = R[rs] + 0
-                *alu_control = 2; // add
+                strcpy(opname, "jr"); // PC = R[rs] + 0
+                alu_control = 2; // add
                 break;
             case 0x20: // add
-                opname = "add";
-                *alu_control = 2; // add
+                strcpy(opname, "add");
+                alu_control = 2; // add
                 break;
             case 0x21: // addu
-                opname = "addu";
-                *alu_control = 2; // add
+                strcpy(opname, "addu");
+                alu_control = 2; // add
                 break;
             case 0x22: // sub
-                opname = "sub";
-                *alu_control = 6; // sub
+                strcpy(opname, "sub");
+                alu_control = 6; // sub
                 break;
             case 0x24: // and
-                opname = "and";
-                *alu_control = 0; // and
+                strcpy(opname, "and");
+                alu_control = 0; // and
                 break;
             case 0x25: // or, move
-                opname = "or, move";
-                *alu_control = 1; // or
+                strcpy(opname, "or, move");
+                alu_control = 1; // or
                 break;
             case 0x2a: // slt
-                opname = "slt";
-                *alu_control = 7; // set less than
+                strcpy(opname, "slt");
+                alu_control = 7; // set less than
                 break;
 
             default:
                 fprintf(stderr, "\nfunct error: 0X%X", funct);
                 exit(1);
         }
-
     }
+    return alu_control;
 }
 
 u_int32_t alu(u_int32_t alu_control, u_int32_t input1, u_int32_t input2) {
@@ -528,62 +522,109 @@ bool detect_hazard() {
     return (id_ex.EX_M_WB[5] && ((id_ex.rt == if_id_rs) || (id_ex.rt == if_id_rt)));
 }
 
+u_int8_t forwardA() {
+    bool ex_mem_RegWrite = ex_mem.M_WB[3];
+    bool mem_wb_RegWrite = mem_wb.WB[0];
+
+    // EX hazard
+    if (ex_mem_RegWrite && (ex_mem.rd != 0) && (ex_mem.rd == id_ex.rs)) {
+        return 2;
+    } else if ( // mem hazard
+            mem_wb_RegWrite && (mem_wb.rd != 0)
+            && !(ex_mem_RegWrite && (ex_mem.rd != 0) && (ex_mem.rd != id_ex.rs))
+            && (mem_wb.rd == id_ex.rs)){
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+u_int8_t forwardB() {
+    bool ex_mem_RegWrite = ex_mem.M_WB[3];
+    bool mem_wb_RegWrite = mem_wb.WB[0];
+
+    // EX hazard
+    if (ex_mem_RegWrite && (ex_mem.rd != 0) && (ex_mem.rd == id_ex.rt)) {
+        return 2;
+    } else if ( // mem hazard
+            mem_wb_RegWrite && (mem_wb.rd != 0)
+            && !(ex_mem_RegWrite && (ex_mem.rd != 0) && (ex_mem.rd != id_ex.rt))
+            && (mem_wb.rd == id_ex.rt)){
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
 void execute(){
     // Load values from the pipeline register.
-    u_int32_t *control = id_ex.EX_M_WB;
-    u_int32_t pc = id_ex.pc;
+    bool RegDst = id_ex.EX_M_WB[0];
+    bool ALUOp1 = id_ex.EX_M_WB[1];
+    bool ALUOp0 = id_ex.EX_M_WB[2];
+    bool ALUSrc = id_ex.EX_M_WB[3];
     u_int32_t readData1 = id_ex.readData1;
     u_int32_t readData2 = id_ex.readData2;
     u_int32_t ext_imm = id_ex.ext_imm;
+    u_int32_t rs = id_ex.rs;
     u_int32_t rt = id_ex.rt;
     u_int32_t rd = id_ex.rd;
 
-    u_int32_t input1 = readData1;
-    u_int32_t input2 = control[3] ? ext_imm : readData2; //ALUSrc
+    // todo: forwarding
+    // <1. Forwarding>
 
-    // <1. Execute Operation>
-    u_int32_t alu_result = alu(input1, input2);
-    if (alu_result != 0xFFFFFFFF) {
-        printf("  [Execute Operation] Operation: %s\n", op_name);
+    u_int32_t input1 = 0;
+    u_int32_t input2 = 0;
+    u_int8_t forwardA_signal = forwardA();
+    u_int8_t forwardB_signal = forwardB();
+
+    if (forwardA_signal == 0) {
+        input1 = readData1;
+    } else if (forwardA_signal == 1) {
+        // from memory or earlier ALU result
+        bool mem_wb_MemtoReg = mem_wb.WB[1];
+        input1 =  mem_wb_MemtoReg? mem_wb.readData: mem_wb.alu_result;
+    } else if (forwardA_signal == 2) {
+        // from prior ALU result
+        input1 = ex_mem.alu_result;
     }
 
-    // <2. Calculate address>
-    // determine the BrTaken control signal.
-    bool BrTaken = 0;
-    if (inst.opcode == 4){ // beq
-        BrTaken = control[4] && (alu_result == 0); // branch
-    } else if (inst.opcode == 5){ //bne
-        BrTaken = control[4] && (alu_result != 0);
-    }
-    bool PCSrc1 = Jump;
-    bool PCSrc2 = BrTaken;
-
-    // when funct field is "0x8", jr operation occurs.
-    if (inst.funct == 0x8){
-        pc_next = r[inst.rs];
-        printf("  [PC Update] PC <- 0X%X (jr) \n", pc_next);
-
+    if (ALUSrc) {
+        input2 = ext_imm;
     } else {
-        if (!PCSrc2 && !PCSrc1) { // PC + 4
-            pc_next = pc_now + 4;
-            printf("  [PC Update] PC <- 0X%X + 4\n", pc_now);
-
-        } else if (PCSrc2 && !PCSrc1) { // Br Taken
-            pc_next = (pc_now + 4) + (ext_imm * 4);
-            printf("  [PC Update] PC <- (0X%X + 4) + 0X%X (branch)\n", pc_now, (ext_imm * 4));
-
-        } else { // Jump
-            pc_next = inst.addr * 4 + (u_int32_t)((u_int32_t)(pc_now / pow(2, 28)) * pow(2, 28)); // shift left 2 and concat.
-            printf("  [PC Update] PC <- 0X%X (jump)\n", pc_next);
+        if (forwardB_signal == 0) {
+            input2 = readData2;
+        } else if (forwardB_signal == 1) {
+            // from memory or earlier ALU result
+            bool mem_wb_MemtoReg = mem_wb.WB[1];
+            input2 =  mem_wb_MemtoReg? mem_wb.readData: mem_wb.alu_result;
+        } else if (forwardB_signal == 2) {
+            // from prior ALU result
+            input2 = ex_mem.alu_result;
         }
     }
 
-    if (pc_next == 0xFFFFFFFF) {
-        terminated = true;
+    // <2. Execute Operation>
+    char opname[20] = "";
+    u_int32_t funct = ext_imm % (int)pow(2, 6);
+    u_int32_t alu_control = get_alu_control(ALUOp1, ALUOp0, funct, opname);
+    u_int32_t alu_result = alu(alu_control, input1, input2);
+
+
+    if (alu_result != 0xFFFFFFFF) {
+        printf("  [Execute Operation] Operation name: %s\n", opname);
+    } else {
+        printf("  [Execute Operation] Operation name: %s\n", opname);
     }
 
     // Store values in the pipeline register.
-
+    ex_mem.M_WB[0] = id_ex.EX_M_WB[4];
+    ex_mem.M_WB[1] = id_ex.EX_M_WB[5];
+    ex_mem.M_WB[2] = id_ex.EX_M_WB[6];
+    ex_mem.M_WB[3] = id_ex.EX_M_WB[7];
+    ex_mem.M_WB[4] = id_ex.EX_M_WB[8];
+    ex_mem.alu_result = alu_result;
+    ex_mem.readData2 = input2;
+    ex_mem.rd = RegDst? rd: rt;
 }
 
 
